@@ -5,11 +5,27 @@
   "scripts": {
     "test": "node --test tests/connection.cjs tests/journal.cjs tests/ibkr.cjs tests/reconcile.cjs",
     "test:browser": "node tests/browser.cjs",
-    "test:ui": "node tests/ui.cjs"
+    "test:ui": "node tests/ui.cjs",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/serve.mjs",
+    "test:neon": "node --test tests/neon.cjs",
+    "test:neon:browser": "node tests/neon-browser.cjs",
+    "neon:link": "neon init -y --no-agent-setup --org-id org-green-sky-81867832 --project-id plain-pine-04599329 --branch production --services postgres,auth,functions --config-dir /workspace/.onboarding/neon-config",
+    "neon:deploy": "neon deploy --env .env.local --config-dir /workspace/.onboarding/neon-config"
   },
   "devDependencies": {
     "chart.js": "4.4.1",
-    "playwright": "1.64.1",
-    "jsdom": "26.1.0"
+    "esbuild": "^0.28.2",
+    "jsdom": "26.1.0",
+    "neon": "^9.5.0",
+    "playwright": "1.64.1"
+  },
+  "dependencies": {
+    "@neon/auth": "^0.8.2",
+    "@neon/config": "^1.14.0",
+    "@neon/env": "^2.1.3",
+    "@neon/functions": "^0.11.0",
+    "jose": "^6.2.17",
+    "pg": "^8.23.1"
   }
 }
