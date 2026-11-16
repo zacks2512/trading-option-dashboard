@@ -1,5 +1,102 @@
 # Private options trading journal
 
+## Neon private journal
+
+### Vercel hosting (preferred)
+
+Create a Vercel project by importing this repository after merging the migration
+branch. `vercel.json` selects **Other** (no framework), runs `npm ci` and
+`npm run build`, and publishes only `dist/`. The Node runtime is pinned to 24.x.
+No database credentials or Neon API key are needed in Vercel: the frontend build
+uses `neon-public-config.json`, which contains only public service endpoints.
+`.vercelignore` also excludes local secret files from CLI uploads.
+
+After Vercel assigns the production URL, add its **exact HTTPS origin** to both:
+
+- Neon Auth trusted domains (`neon neon-auth domain add <origin>`).
+- `JOURNAL_ALLOWED_ORIGINS` in the backend's ignored `.env.local`, as a
+  comma-separated list. Run `npm run neon:deploy` to apply this backend setting.
+
+Keep local development origins if needed. Never allow all `*.vercel.app` domains;
+other Vercel customers and previews must not inherit access. A preview requires
+its own explicit Auth/CORS configuration. Changing the Vercel frontend alone
+does not update Neon settings. After deployment verify the owner's email-code
+flow, sign-in, save, reload and sign-out on the production URL.
+
+The new Neon frontend starts an empty journal for the verified owner
+configured by the server-only `OWNER_EMAIL` setting. Google Sheets data is not imported or changed.
+Postgres, managed email/password Auth and a `journal` Function are configured
+in `neon.ts`. The original static source remains available for the previous
+Sheets workflow; **publish `dist/` for the Neon version**.
+
+```sh
+npm ci
+npm run neon:link
+npm run neon:deploy
+npm run build
+npm start
+```
+
+Set `OWNER_EMAIL` in the server environment or ignored `.env.local` before
+deploying. Neon authentication (`NEON_API_KEY`, or an authenticated CLI profile)
+is required for linking/deployment. In the prepared cloud environment the CLI
+profile directory is `/workspace/.onboarding/neon-config`. `neon:link` preserves
+the existing `neon.ts`. Always review it before deploying an existing branch.
+Never paste connection strings into browser code, chat, or Git.
+
+`neon:deploy` writes the managed variables into `.env.local`. Database URLs are
+used only inside the Function; `build` publishes only the public Auth URL and
+Function URL, plus an explicit whitelist of static assets. `npm start` serves
+that build on port 3000. Do not serve the repository root, which contains local
+secrets. For GitHub Pages, deploy the contents of `dist/`, not the repository root.
+The frontend origin must be allowed in both Neon Auth and `server/index.mjs`.
+The existing GitHub Pages origin and local port 3000 are configured.
+`neon-public-config.json` contains only public service endpoints so CI can build
+without database credentials. Update it if the project's branch changes. The
+manual **Publish Neon journal** GitHub Actions workflow builds and deploys
+`dist/`; it requires the repository's Pages source to be **GitHub Actions**.
+Preparing these files does not update the current public site.
+
+First use: choose **Sign in → Create account**, use the owner email and your
+own password, verify the email code, then sign in. Choose **Set up journal**
+to create your first trading account and fee defaults. Sign-out clears loaded
+records. The server checks the JWT signature/issuer and the verified owner's
+identity in `neon_auth.user` before reading or writing journal records.
+
+The additive migration in `server/schema.mjs` is applied on the first authorized
+journal access. Every save locks the owner's journal within a Postgres
+transaction, rechecks record versions and trade guards, validates accounting,
+and appends revisions and audit history atomically. Lost-response replays use
+a transaction ID and payload hash. No client may write audit history directly.
+
+```sh
+npm test
+npm run test:ui
+npm run test:neon
+JOURNAL_BROWSER_EXECUTABLE=/usr/bin/chromium npm run test:browser
+```
+
+For the real-Postgres integration and Neon browser suites, start a disposable
+local database (these suites never use `.env.local` database credentials):
+
+```sh
+docker run --name trading-neon-test --rm -d \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:55432:5432 postgres:18-alpine
+# Wait until docker exec trading-neon-test pg_isready succeeds.
+JOURNAL_TEST_POSTGRES=1 npm run test:neon
+npm run build
+JOURNAL_BROWSER_EXECUTABLE=/usr/bin/chromium npm run test:neon:browser
+docker stop trading-neon-test
+```
+
+The Neon browser test exercises the real browser Auth SDK and real Postgres
+storage, with only the identity provider transport mocked. Live email delivery,
+the owner's first sign-in, and the final frontend host require a separate live
+check. Shared Neon email delivery is suitable for development; configure custom
+SMTP for production per the Neon Auth production checklist.
+
+## Previous Google Sheets workflow
+
 An English options journal on GitHub Pages, with private Google Sheets storage. Supports stock/ETF options, multiple USD accounts, package or individual-leg prices, open and historical closed trades, partial closes, manual marks, commissions, linked rolls, planning/review lists and revision history.
 
 ## First use — no manual column setup

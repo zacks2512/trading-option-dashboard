@@ -449,6 +449,11 @@ function loadFile(evt){
       var csvHeaders=text.replace(/^\uFEFF/,'').split(/\r?\n/,1)[0].split(',').map(function(header){
         return header.trim().replace(/^"|"$/g,'');
       });
+      if(['trading-journal-historical-import','trading-journal-workbook-import'].includes(jsonData?.format)){
+        if(!window.JournalApp?.importHistorical)throw new Error('Reload the dashboard to enable historical import.');
+        JournalApp.importHistorical(file);
+        return;
+      }
       var isIBKR=!isJSON && ['AssetClass','TradeID'].every(function(header){return csvHeaders.includes(header);});
       if(isIBKR || jsonData?.format==='trading-journal-ibkr-reconciliation'){
         if(!window.JournalApp?.importIBKR)throw new Error('Reload the dashboard to enable IBKR import.');
@@ -1157,6 +1162,8 @@ resetPrivateView();
 <script src="ibkr-import.js?v=20261109-reconcile"></script>
 <script src="ibkr-reconcile.js?v=20261109-reconcile"></script>
 <script src="overview-drill.js?v=20261109-perf-drill"></script>
+<script src="historical-import.js"></script>
+<script src="workbook-import.js"></script>
 <script src="journal-app.js?v=20261109-emotions-drill"></script>
 <script src="private-sheets.js?v=20261109-tab-session"></script>
 </body>

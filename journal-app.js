@@ -85,7 +85,7 @@
   try{await db.commit(mutations,{...options,validate:(latest,changes)=>{
    options.preflight?.(latest);
    validateState(latest,changes);
-  }});if(generation!==epoch)return false;if(d)d.close();render();showStatus('Saved to your private Google Sheet.');
+  }});if(generation!==epoch)return false;if(d)d.close();render();showStatus(db.backend==='neon'?'Saved to your private Neon journal.':'Saved to your private Google Sheet.');
    if(context&&context.epoch===epoch){analyticsContext=context;if(context.currentRef)openAnalyticsRecord(context.currentRef);else analyticsList()}
    return true;}
   catch(error){if(generation===epoch){if(d)errorIn(d,error);else showStatus(error.message,true);}return false;}
@@ -93,17 +93,17 @@
  }
  function clear(){epoch++;analyticsContext=null;analyticsRefs=new WeakMap();store=null;legacy=[];selectedId=null;accountFilter='';search='';symbolFilter='';strategyFilter='';tradeStatus='open';if(dialog)dialog.close();render();}
  async function connect(transport){
-  epoch++;analyticsContext=null;analyticsRefs=new WeakMap();const generation=epoch;store=new S.Store(transport);legacy=[];accountFilter='';
+  epoch++;analyticsContext=null;analyticsRefs=new WeakMap();const generation=epoch;store=transport.createStore?transport.createStore():new S.Store(transport);legacy=[];accountFilter='';
   try{await store.load();if(generation!==epoch)return;render();}catch(error){if(generation===epoch)showStatus(error.message,true);}
  }
- function requireSetup(){if(!store?.initialized){showStatus('Connect your private sheet, then choose Set up journal tabs.',true);return false;}return true;}
+ function requireSetup(){if(!store?.initialized){showStatus(window.NEON_CONFIG?'Sign in, then set up your journal.':'Connect your private sheet, then choose Set up journal tabs.',true);return false;}return true;}
  function setup(){
   if(!store)return;
   const d=openDialog('Set up your trading journal');
-  d.append(notice('This creates eight TJ_ tabs in the selected Google file. All Data and your existing worksheets stay untouched. Make a backup copy in Google Sheets first.'));
+  d.append(notice(store?.backend==='neon'?'Create your first account and journal settings in Neon.': 'This creates eight TJ_ tabs in the selected Google file. All Data and your existing worksheets stay untouched. Make a backup copy in Google Sheets first.'));
   const form=node('form',{}),name=input('text','Main account',{required:true,maxlength:100}),rate=input('number',0,{min:0,step:.01,required:true});
   form.append(node('div',{class:'journal-fields'},field('First account name',name),field('Default commission per contract (USD)',rate)),node('small',{},'Enter your own broker tariff. A value of 0 means no estimated fees. Actual fees can always override it.'));
-  formFooter(d,form,'Create journal tabs');d.append(form);
+  formFooter(d,form,store?.backend==='neon'?'Create journal':'Create journal tabs');d.append(form);
   form.onsubmit=async event=>{
    event.preventDefault();if(busy)return;busy=true;const generation=epoch,db=store;form.querySelectorAll('button').forEach(b=>b.disabled=true);
    try{
@@ -115,7 +115,7 @@
      for(const [group,labels]of Object.entries(seeds))for(const label of labels){const lid=uuid();m.push({table:'lists',id:lid,data:{id:lid,group,label,archived:false},expected:''})}
      await db.commit(m,{note:'Initial journal setup'});
     }
-    if(generation!==epoch)return;d.close();render();showStatus('Journal tabs are ready. You can add your first trade.');
+    if(generation!==epoch)return;d.close();render();showStatus(db.backend==='neon'?'Your journal is ready. You can add your first trade.':'Journal tabs are ready. You can add your first trade.');
    }catch(error){if(generation===epoch)errorIn(d,error)}finally{busy=false;if(d.isConnected)form.querySelectorAll('button').forEach(b=>b.disabled=false);}
   };
  }
@@ -366,6 +366,38 @@
   const d=openDialog('Manage historical summary');d.append(notice('This creates an editable historical summary in TJ_Trades. The original All Data row is left untouched and excluded from duplicate display while this record exists. No execution history is invented.'));
   d.append(button('Create managed summary',()=>saveChanges([mutation('trades',t)],{note:'Legacy summary adopted'},d),true),button('Cancel',()=>d.close()));
  }
+ async function importHistorical(file){
+  if(!requireSetup())return;
+  const generation=epoch;
+  try{
+   const bundle=JSON.parse(await file.text());if(generation!==epoch)return;
+   const importer=bundle.format==='trading-journal-workbook-import'?WorkbookImport:HistoricalImport;
+   await store.load();if(generation!==epoch)return;
+   const accounts=records('accounts').filter(a=>!a.archived);
+   if(!accounts.length)throw Error('Add an active account before importing.');
+   const d=openDialog('Import Google Sheets history'),account=select(accounts.map(a=>[a.id,a.name]),setting('defaultAccount',accounts[0].id)),preview=node('div',{});
+   const confirm=button('Import to Neon',async()=>{
+    try{
+     const accountId=account.value,plan=importer.plan(bundle,accountId,store.all('trades',true));
+     const changes=['trades','legs','actions','quotes'].flatMap(table=>(plan[table]||[]).map(r=>mutation(table,r)));
+     if(!changes.length){d.close();showStatus('All source records have already been imported.');return;}
+     const expected=changes.map(m=>m.table+':'+m.id).sort().join('|');
+     await saveChanges(changes,{note:'Imported Google Sheets history: '+bundle.source,preflight:latest=>{
+      const fresh=importer.plan(bundle,accountId,latest.all('trades',true));
+      const keys=['trades','legs','actions','quotes'].flatMap(table=>(fresh[table]||[]).map(r=>table+':'+r.id)).sort().join('|');
+      if(keys!==expected)throw Error('Journal changed during review. Reopen the import to check duplicates.');
+     }},d);
+    }catch(error){errorIn(d,error)}
+   },true);
+   function inspect(){try{
+    const plan=importer.plan(bundle,account.value,store.all('trades',true));
+    preview.replaceChildren(notice(plan.trades.length+' new trades · '+plan.duplicates.length+' already imported'),node('p',{},plan.closed+' closed trades · '+plan.open+' open positions · realized net P&L '+money(plan.closedPnl)),notice('Detailed trades retain source executions, legs, fees and notes. Unmatched historical rows retain their original summaries or recorded openings. Past expiry does not prove closure. Existing journal records are preserved.'),table(['Trade','Source status','Entry','Net P&L'],plan.trades.map(t=>node('tr',{},node('td',{},t.title),node('td',{},E.summarize(t,plan.legs?.filter(r=>r.tradeId===t.id)||[],plan.actions.filter(r=>r.tradeId===t.id)).status),node('td',{},t.entryDate),currencyCell(E.summarize(t,plan.legs?.filter(r=>r.tradeId===t.id)||[],plan.actions.filter(r=>r.tradeId===t.id)).realized)))));
+    confirm.disabled=!plan.trades.length;
+   }catch(error){preview.replaceChildren(notice(error.message));confirm.disabled=true;}}
+   account.addEventListener('change',inspect);
+   d.append(field('Import into account',account),preview,node('footer',{},button('Cancel',()=>d.close()),confirm));inspect();
+  }catch(error){showStatus('Historical import: '+error.message,true)}
+ }
  function importIBKR(initialFile){
   let suppliedFile = typeof initialFile?.text === 'function' ? initialFile : null;
   if(!requireSetup() || busy) return;
@@ -495,8 +527,8 @@
  function listPage(){
   const target=$('page-open-trades');if(!target)return;target.replaceChildren();target.classList.add('journal');
   target.append(node('div',{class:'journal-heading'},node('div',{},node('p',{class:'journal-eyebrow'},'YOUR JOURNAL'),node('h1',{},'Trades'),node('small',{},'Your positions, from first entry to final close.')),button('New trade',()=>tradeEditor(),true)));
-  if(!store){target.append(node('div',{class:'journal-welcome'},node('div',{class:'journal-welcome-icon'},'↗'),node('h2',{},'Your next trade starts here'),node('p',{},'Connect Google and select your private spreadsheet to view positions and record trades.'),button('Connect Google',()=>connectGoogle(),true)));return;}
-  if(!store.initialized){target.append(notice('Set up the journal once to start. Your existing worksheets stay untouched.'),button('Set up journal tabs',setup,true));return;}
+  if(!store){target.append(node('div',{class:'journal-welcome'},node('div',{class:'journal-welcome-icon'},'↗'),node('h2',{},'Your next trade starts here'),node('p',{},window.NEON_CONFIG?'Sign in to your private journal to view positions and record trades.':'Connect Google and select your private spreadsheet to view positions and record trades.'),button(window.NEON_CONFIG?'Sign in':'Connect Google',()=>window.NEON_CONFIG?window.NeonJournal?.signIn():connectGoogle(),true)));return;}
+  if(!store.initialized){target.append(notice('Set up the journal once to start.'),button(store.backend==='neon'?'Set up journal':'Set up journal tabs',setup,true));return;}
   const heading = target.querySelector('.journal-heading');
   const newTrade = heading.lastElementChild;
   heading.append(node('div',{class:'journal-actions'},button('Import from IBKR',importIBKR),newTrade));
@@ -524,14 +556,14 @@
  }
  function settingsPage(){
   const target=$('page-journal-settings');if(!target)return;target.replaceChildren();target.classList.add('journal');target.append(node('h1',{},'Journal settings'));
-  if(!store){target.append(notice('Connect a private spreadsheet first.'));return;}if(!store.initialized){target.append(button('Set up journal tabs',setup,true));return;}
+  if(!store){target.append(notice(window.NEON_CONFIG?'Sign in to your journal first.':'Connect a private spreadsheet first.'));return;}if(!store.initialized){target.append(button(store.backend==='neon'?'Set up journal':'Set up journal tabs',setup,true));return;}
   target.append(node('div',{class:'journal-actions'},button('Add account',()=>accountEditor(),true),button('History & recycle bin',()=>historyView()),button('Reload journal',()=>reload())));
   const accounts=records('accounts'),defaultSelect=select(accounts.filter(a=>!a.archived).map(a=>[a.id,a.name]),setting('defaultAccount','')),legacySelect=select(accounts.map(a=>[a.id,a.name]),setting('legacyAccount','')),rate=input('number',setting('feeRate',0),{min:0,step:'any'}),legacyTab=input('text',setting('legacyTab','All Data'),{maxlength:100});
-  const form=node('form',{},node('div',{class:'journal-fields'},field('Default account',defaultSelect),field('Account for All Data history',legacySelect),field('Default fee per contract (USD)',rate),field('Legacy worksheet title',legacyTab)),node('button',{class:'btn p',type:'submit'},'Save settings'));
+  const form=node('form',{},node('div',{class:'journal-fields'},field('Default account',defaultSelect),store.backend==='neon'?null:field('Account for All Data history',legacySelect),field('Default fee per contract (USD)',rate),store.backend==='neon'?null:field('Legacy worksheet title',legacyTab)),node('button',{class:'btn p',type:'submit'},'Save settings'));
   form.onsubmit=e=>{e.preventDefault();try{const values={defaultAccount:defaultSelect.value,legacyAccount:legacySelect.value,feeRate:E.number(rate.value,'Fee rate'),legacyTab:legacyTab.value.trim()};saveChanges(Object.entries(values).map(([id,value])=>mutation('settings',{id,value})),{note:'Journal settings updated'},null)}catch(error){showStatus(error.message,true)}};
   target.append(form,notice('Fee changes affect future entries only: each action stores the rate used at the time. Current currency is USD for every account.'),node('h2',{},'Accounts'),table(['Name','Status','Edit'],accounts.map(a=>node('tr',{},node('td',{},a.name),node('td',{},a.archived?'Archived':a.id===setting('defaultAccount','')?'Default':'Active'),node('td',{},button('Edit',()=>accountEditor(a)))))));
   for(const group of ['strategy','emotion','mistake']){target.append(node('h2',{},group[0].toUpperCase()+group.slice(1)+' values'),button('Add '+group,()=>listEditor(group)),table(['Label','Status','Edit'],records('lists').filter(l=>l.group===group).map(l=>node('tr',{},node('td',{},l.label),node('td',{},l.archived?'Archived':'Available'),node('td',{},button('Edit',()=>listEditor(group,l)))))));}
-  target.append(notice('Sheets is append-only for journal revisions. Use the dashboard for edits, not manual row sorting/deletion in TJ_ tabs. Concurrent saves are checked before writing, but Google Sheets is not a transactional database with conditional locks. Use one editing window per trade; conflicting revisions are retained for repair.','warn'));
+  target.append(notice(store.backend==='neon'?'Journal saves are atomic. Every edit keeps its previous revision and audit history; stale changes are rejected.':'Sheets is append-only for journal revisions. Use the dashboard for edits, not manual row sorting/deletion in TJ_ tabs. Concurrent saves are checked before writing, but Google Sheets is not a transactional database with conditional locks. Use one editing window per trade; conflicting revisions are retained for repair.','warn'));
  }
  function syncAnalytics(){
   const normalized=legacyItems().map(l=>{analyticsRefs.set(l.parsed,{kind:'legacy',key:l.key});return l.parsed});
@@ -565,5 +597,5 @@
  const filters=node('div',{class:'journal-filters'},searchInput,symbolSelect,strategySelect,button('Clear filters',()=>{search='';symbolFilter='';strategyFilter='';accountFilter='';searchInput.value='';render()}));
  const updateFilters=()=>{searchInput.value=search;for(const [control,key,label,value]of [[symbolSelect,'symbol','All symbols',symbolFilter],[strategySelect,'strategy','All strategies',strategyFilter]]){const values=[...new Set([...records('trades').map(t=>t[key]),...legacy.map(l=>l.parsed[key])].filter(Boolean))].sort();control.replaceChildren(node('option',{value:''},label),...values.map(v=>node('option',{value:v},v)));control.value=value;}const page=$('page-open-trades');const tabs=page?.querySelector('.journal-status-tabs');if(tabs)tabs.after(filters);};
  const originalListPage=listPage;listPage=function(){const focused=document.activeElement,restoreFocus=filters.contains(focused),selection=focused===searchInput?[searchInput.selectionStart,searchInput.selectionEnd]:null;originalListPage();updateFilters();if(restoreFocus&&focused.isConnected){focused.focus({preventScroll:true});if(selection)searchInput.setSelectionRange(...selection)}};
- window.JournalApp={connect,clear,setLegacy,clearLegacy,reload,setup,render,tradeEditor,detail,setTradeStatus,importIBKR,openAnalytics,legacyTitle:()=>setting('legacyTab','All Data')};render();
+ window.JournalApp={connect,clear,setLegacy,clearLegacy,reload,setup,render,tradeEditor,detail,setTradeStatus,importHistorical,importIBKR,openAnalytics,legacyTitle:()=>setting('legacyTab','All Data')};render();
 })();
