@@ -13,7 +13,7 @@ for (const url of Object.values(config)) {
 }
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/vendor', { recursive: true });
-for (const file of ['dashboard-theme.css', 'journal.css', 'journal-engine.js', 'journal-store.js', 'journal-app.js', 'ibkr-import.js', 'ibkr-reconcile.js', 'overview-drill.js', 'vendor/purify.min.js', 'vendor/DOMPurify-LICENSE']) await copyFile(file, `dist/${file}`);
+for (const file of ['dashboard-theme.css', 'journal.css', 'journal-engine.js', 'journal-store.js', 'journal-app.js', 'historical-import.js', 'workbook-import.js', 'ibkr-import.js', 'ibkr-reconcile.js', 'overview-drill.js', 'vendor/purify.min.js', 'vendor/DOMPurify-LICENSE']) await copyFile(file, `dist/${file}`);
 const html = (await readFile('index.html', 'utf8'))
   .replace('<script src="journal-engine.js">', '<script src="neon-public.js"></script>\n<script src="journal-engine.js">')
   .replace(/<script src="private-sheets\.js[^>]*><\/script>/, '<script src="neon-client.js"></script>')

@@ -366,6 +366,38 @@
   const d=openDialog('Manage historical summary');d.append(notice('This creates an editable historical summary in TJ_Trades. The original All Data row is left untouched and excluded from duplicate display while this record exists. No execution history is invented.'));
   d.append(button('Create managed summary',()=>saveChanges([mutation('trades',t)],{note:'Legacy summary adopted'},d),true),button('Cancel',()=>d.close()));
  }
+ async function importHistorical(file){
+  if(!requireSetup())return;
+  const generation=epoch;
+  try{
+   const bundle=JSON.parse(await file.text());if(generation!==epoch)return;
+   const importer=bundle.format==='trading-journal-workbook-import'?WorkbookImport:HistoricalImport;
+   await store.load();if(generation!==epoch)return;
+   const accounts=records('accounts').filter(a=>!a.archived);
+   if(!accounts.length)throw Error('Add an active account before importing.');
+   const d=openDialog('Import Google Sheets history'),account=select(accounts.map(a=>[a.id,a.name]),setting('defaultAccount',accounts[0].id)),preview=node('div',{});
+   const confirm=button('Import to Neon',async()=>{
+    try{
+     const accountId=account.value,plan=importer.plan(bundle,accountId,store.all('trades',true));
+     const changes=['trades','legs','actions','quotes'].flatMap(table=>(plan[table]||[]).map(r=>mutation(table,r)));
+     if(!changes.length){d.close();showStatus('All source records have already been imported.');return;}
+     const expected=changes.map(m=>m.table+':'+m.id).sort().join('|');
+     await saveChanges(changes,{note:'Imported Google Sheets history: '+bundle.source,preflight:latest=>{
+      const fresh=importer.plan(bundle,accountId,latest.all('trades',true));
+      const keys=['trades','legs','actions','quotes'].flatMap(table=>(fresh[table]||[]).map(r=>table+':'+r.id)).sort().join('|');
+      if(keys!==expected)throw Error('Journal changed during review. Reopen the import to check duplicates.');
+     }},d);
+    }catch(error){errorIn(d,error)}
+   },true);
+   function inspect(){try{
+    const plan=importer.plan(bundle,account.value,store.all('trades',true));
+    preview.replaceChildren(notice(plan.trades.length+' new trades · '+plan.duplicates.length+' already imported'),node('p',{},plan.closed+' closed trades · '+plan.open+' open positions · realized net P&L '+money(plan.closedPnl)),notice('Detailed trades retain source executions, legs, fees and notes. Unmatched historical rows retain their original summaries or recorded openings. Past expiry does not prove closure. Existing journal records are preserved.'),table(['Trade','Source status','Entry','Net P&L'],plan.trades.map(t=>node('tr',{},node('td',{},t.title),node('td',{},E.summarize(t,plan.legs?.filter(r=>r.tradeId===t.id)||[],plan.actions.filter(r=>r.tradeId===t.id)).status),node('td',{},t.entryDate),currencyCell(E.summarize(t,plan.legs?.filter(r=>r.tradeId===t.id)||[],plan.actions.filter(r=>r.tradeId===t.id)).realized)))));
+    confirm.disabled=!plan.trades.length;
+   }catch(error){preview.replaceChildren(notice(error.message));confirm.disabled=true;}}
+   account.addEventListener('change',inspect);
+   d.append(field('Import into account',account),preview,node('footer',{},button('Cancel',()=>d.close()),confirm));inspect();
+  }catch(error){showStatus('Historical import: '+error.message,true)}
+ }
  function importIBKR(initialFile){
   let suppliedFile = typeof initialFile?.text === 'function' ? initialFile : null;
   if(!requireSetup() || busy) return;
@@ -565,5 +597,5 @@
  const filters=node('div',{class:'journal-filters'},searchInput,symbolSelect,strategySelect,button('Clear filters',()=>{search='';symbolFilter='';strategyFilter='';accountFilter='';searchInput.value='';render()}));
  const updateFilters=()=>{searchInput.value=search;for(const [control,key,label,value]of [[symbolSelect,'symbol','All symbols',symbolFilter],[strategySelect,'strategy','All strategies',strategyFilter]]){const values=[...new Set([...records('trades').map(t=>t[key]),...legacy.map(l=>l.parsed[key])].filter(Boolean))].sort();control.replaceChildren(node('option',{value:''},label),...values.map(v=>node('option',{value:v},v)));control.value=value;}const page=$('page-open-trades');const tabs=page?.querySelector('.journal-status-tabs');if(tabs)tabs.after(filters);};
  const originalListPage=listPage;listPage=function(){const focused=document.activeElement,restoreFocus=filters.contains(focused),selection=focused===searchInput?[searchInput.selectionStart,searchInput.selectionEnd]:null;originalListPage();updateFilters();if(restoreFocus&&focused.isConnected){focused.focus({preventScroll:true});if(selection)searchInput.setSelectionRange(...selection)}};
- window.JournalApp={connect,clear,setLegacy,clearLegacy,reload,setup,render,tradeEditor,detail,setTradeStatus,importIBKR,openAnalytics,legacyTitle:()=>setting('legacyTab','All Data')};render();
+ window.JournalApp={connect,clear,setLegacy,clearLegacy,reload,setup,render,tradeEditor,detail,setTradeStatus,importHistorical,importIBKR,openAnalytics,legacyTitle:()=>setting('legacyTab','All Data')};render();
 })();
