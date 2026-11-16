@@ -8,7 +8,10 @@ export default defineConfig({
     journal: {
       name: "Private options journal",
       source: "./server/index.mjs",
-      env: { OWNER_EMAIL: { value: process.env.OWNER_EMAIL, required: true } },
+      env: {
+        OWNER_EMAIL: { value: process.env.OWNER_EMAIL, required: true },
+        JOURNAL_ALLOWED_ORIGINS: { value: process.env.JOURNAL_ALLOWED_ORIGINS, required: false, onUndefined: "skip" },
+      },
     },
   },
   // Branch policy: per-branch tuning

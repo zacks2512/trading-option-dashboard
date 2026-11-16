@@ -3,6 +3,7 @@ import { attachDatabasePool } from '@neon/functions';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { createAPI } from './api.mjs';
 import { createRepository } from './repository.mjs';
+import { allowedOrigins } from './origins.mjs';
 
 for (const name of ['DATABASE_URL', 'NEON_AUTH_BASE_URL', 'NEON_AUTH_JWKS_URL', 'OWNER_EMAIL']) {
   if (!process.env[name]) throw new Error(`Required server configuration missing: ${name}`);
@@ -19,6 +20,6 @@ export default {
       return rows.length === 1 && rows[0].verified === true && rows[0].email.toLowerCase() === process.env.OWNER_EMAIL.toLowerCase();
     },
     repository: createRepository(pool),
-    origins: ['https://zacks2512.github.io', 'http://localhost:3000', 'http://127.0.0.1:3000'],
+    origins: allowedOrigins(process.env.JOURNAL_ALLOWED_ORIGINS),
   }),
 };

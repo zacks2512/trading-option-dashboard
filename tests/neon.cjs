@@ -4,6 +4,16 @@ const { randomUUID } = require('node:crypto');
 const S = require('../journal-store.js');
 const request = (path, token, body, origin = 'https://zacks2512.github.io') => new Request(`https://journal.test${path}`, { method: body ? 'POST' : 'GET', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), Origin: origin }, ...(body ? { body: JSON.stringify(body) } : {}) });
 
+test('Vercel access is limited to explicitly configured HTTPS origins', async () => {
+  const { allowedOrigins } = await import('../server/origins.mjs');
+  const { createAPI } = await import('../server/api.mjs');
+  const origins = allowedOrigins('https://my-journal.vercel.app,http://localhost:3000');
+  const api = createAPI({ verify: async () => ({ sub: 'owner' }), authorize: async () => true, repository: { load: async () => ({ initialized: false }) }, origins });
+  assert.equal((await api(request('/snapshot', 'owner', undefined, 'https://my-journal.vercel.app'))).status, 200);
+  assert.equal((await api(request('/snapshot', 'owner', undefined, 'https://another-project.vercel.app'))).status, 403);
+  for (const value of ['https://*.vercel.app', 'http://public.example', 'https://user:password@example.com', 'https://example.com/path']) assert.throws(() => allowedOrigins(value));
+});
+
 test('Neon API authenticates and authorizes before accessing journal data', async () => {
   const { createAPI } = await import('../server/api.mjs');
   let reads = 0;

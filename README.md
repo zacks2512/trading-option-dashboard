@@ -2,6 +2,27 @@
 
 ## Neon private journal
 
+### Vercel hosting (preferred)
+
+Create a Vercel project by importing this repository after merging the migration
+branch. `vercel.json` selects **Other** (no framework), runs `npm ci` and
+`npm run build`, and publishes only `dist/`. The Node runtime is pinned to 24.x.
+No database credentials or Neon API key are needed in Vercel: the frontend build
+uses `neon-public-config.json`, which contains only public service endpoints.
+`.vercelignore` also excludes local secret files from CLI uploads.
+
+After Vercel assigns the production URL, add its **exact HTTPS origin** to both:
+
+- Neon Auth trusted domains (`neon neon-auth domain add <origin>`).
+- `JOURNAL_ALLOWED_ORIGINS` in the backend's ignored `.env.local`, as a
+  comma-separated list. Run `npm run neon:deploy` to apply this backend setting.
+
+Keep local development origins if needed. Never allow all `*.vercel.app` domains;
+other Vercel customers and previews must not inherit access. A preview requires
+its own explicit Auth/CORS configuration. Changing the Vercel frontend alone
+does not update Neon settings. After deployment verify the owner's email-code
+flow, sign-in, save, reload and sign-out on the production URL.
+
 The new Neon frontend starts an empty journal for the verified owner
 configured by the server-only `OWNER_EMAIL` setting. Google Sheets data is not imported or changed.
 Postgres, managed email/password Auth and a `journal` Function are configured
